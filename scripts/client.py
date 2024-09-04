@@ -4,30 +4,36 @@ import time
 import base64
 from load_ip import load_ip
 
-# Dirección IP y puerto donde el servidor escucha
-server_ip = load_ip() # IP de la computadora central
+# Load the server IP
+server_ip = load_ip()
 server_port = 5555
 
-# Inicializa la captura de video
+# Initialize the video capture and zmq socket
 cap = cv2.VideoCapture(0)
 context = zmq.Context()
 socket = context.socket(zmq.REQ)
 socket.connect(f"tcp://{server_ip}:{server_port}")
 
-while True:
-    # Captura el frame
+while cap.isOpened():
     ret, frame = cap.read()
     if not ret:
+        print("Failed to grab frame")
         break
 
-    # Codifica el frame en base64
-    _, buffer = cv2.imencode('.jpg', frame)
+    # Compress the frame before sending
+    _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
     jpg_as_text = base64.b64encode(buffer)
 
-    # Envía el frame al servidor
+    # Send the frame to the server
     socket.send(jpg_as_text)
 
-    # Espera la confirmación del servidor antes de enviar el siguiente frame
-    message = socket.recv()
+    # Set a timeout for receiving confirmation
+    try:
+        socket.setsockopt(zmq.RCVTIMEO, 5000)  # Timeout of 5 seconds
+        message = socket.recv()  # Waiting for confirmation
+    except zmq.Again as e:
+        print("No response from server, retrying...")
+        continue
 
 cap.release()
+socket.close()

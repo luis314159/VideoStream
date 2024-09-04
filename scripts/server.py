@@ -4,34 +4,40 @@ import base64
 import numpy as np
 from load_ip import load_ip
 
-# Dirección IP y puerto donde el servidor escucha
-
-server_ip = load_ip() # IP de la computadora central
+# Load server IP
+server_ip = load_ip()
 server_port = 5555
 
+# Initialize zmq socket
 context = zmq.Context()
 socket = context.socket(zmq.REP)
 socket.bind(f"tcp://{server_ip}:{server_port}")
 
-# Aquí se cargaría tu modelo de Machine Learning
-# model = load_model()
-
 while True:
-    # Recibe el frame de la Raspberry Pi
-    message = socket.recv()
-    jpg_original = base64.b64decode(message)
-    np_arr = np.frombuffer(jpg_original, dtype=np.uint8)
-    frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    try:
+        # Receive the frame
+        message = socket.recv()
+        jpg_original = base64.b64decode(message)
+        np_arr = np.frombuffer(jpg_original, dtype=np.uint8)
 
-    # Procesa el frame con el modelo de inferencia
-    # resultado = model.predict(frame)
+        # Decode the image
+        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        
+        if frame is None:
+            print("Failed to decode frame")
+            continue
 
-    # Muestra el frame (opcional)
-    cv2.imshow("Stream", frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
+        # Display the frame
+        cv2.imshow("Stream", frame)
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+        # Send confirmation back to client
+        socket.send(b"Frame received")
+
+    except Exception as e:
+        print(f"Error: {e}")
         break
 
-    # Envía confirmación de recepción a la Raspberry Pi
-    socket.send(b"Frame received")
-
 cv2.destroyAllWindows()
+socket.close()
