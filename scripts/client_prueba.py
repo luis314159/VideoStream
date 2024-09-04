@@ -25,11 +25,15 @@ def main(test_mode):
     context = zmq.Context()
     socket = context.socket(zmq.REQ)
     
-    try:
-        socket.connect(f"tcp://{server_ip}:{server_port}")
-    except Exception as e:
-        print(f"Failed to connect to server: {e}")
-        return
+    # Try to connect to the server with retries
+    while True:
+        try:
+            socket.connect(f"tcp://{server_ip}:{server_port}")
+            print(f"Connected to server at {server_ip}:{server_port}")
+            break  # Exit the loop if the connection is successful
+        except Exception as e:
+            print(f"Failed to connect to server: {e}. Retrying in 5 seconds...")
+            time.sleep(5)
 
     while True:
         ret, frame = cap.read()
@@ -49,15 +53,33 @@ def main(test_mode):
         jpg_as_text = base64.b64encode(buffer)
 
         # Send the frame to the server
-        socket.send(jpg_as_text)
-
-        # Set a timeout for receiving confirmation
         try:
+            socket.send(jpg_as_text)
+            print("Frame sent to server")
+
+            # Set a timeout for receiving confirmation
             socket.setsockopt(zmq.RCVTIMEO, 5000)  # Timeout of 5 seconds
             message = socket.recv()  # Waiting for confirmation
             print(f"Received reply from server: {message}")
+        
         except zmq.Again as e:
             print("No response from server, retrying...")
+            continue
+        except zmq.ZMQError as e:
+            print(f"ZMQ Error occurred: {e}")
+            print("Attempting to reconnect to the server...")
+            # Close the socket and try to reconnect
+            socket.close()
+            socket = context.socket(zmq.REQ)
+            # Retry connection to server
+            while True:
+                try:
+                    socket.connect(f"tcp://{server_ip}:{server_port}")
+                    print(f"Reconnected to server at {server_ip}:{server_port}")
+                    break  # Exit the loop if reconnected
+                except Exception as e:
+                    print(f"Failed to reconnect to server: {e}. Retrying in 5 seconds...")
+                    time.sleep(5)
             continue
 
     # Clean up

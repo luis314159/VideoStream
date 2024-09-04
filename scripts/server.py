@@ -2,42 +2,66 @@ import cv2
 import zmq
 import base64
 import numpy as np
-from load_ip import load_ip
+import argparse
+import time
 
-# Load server IP
-server_ip = load_ip()
-server_port = 5555
+def main(record_flag):
+    # Setup ZMQ
+    context = zmq.Context()
+    socket = context.socket(zmq.REP)
+    
+    server_ip = "0.0.0.0"  # Listen on all network interfaces
+    server_port = 5555
+    print(f"Starting server at {server_ip}:{server_port}")
+    
+    socket.bind(f"tcp://{server_ip}:{server_port}")
+    
+    # Video writer for recording
+    out = None
 
-# Initialize zmq socket
-context = zmq.Context()
-socket = context.socket(zmq.REP)
-socket.bind(f"tcp://{server_ip}:{server_port}")
+    while True:
+        try:
+            # Receive and decode the frame
+            message = socket.recv()
+            jpg_as_text = base64.b64decode(message)
+            npimg = np.frombuffer(jpg_as_text, dtype=np.uint8)
+            frame = cv2.imdecode(npimg, 1)
 
-while True:
-    try:
-        # Receive the frame
-        message = socket.recv()
-        jpg_original = base64.b64decode(message)
-        np_arr = np.frombuffer(jpg_original, dtype=np.uint8)
+            # Show the frame
+            cv2.imshow("Server Video Stream", frame)
+            if cv2.waitKey(1) & 0xFF == ord('q'):
+                print("Exiting server on 'q' key")
+                break
 
-        # Decode the image
-        frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-        
-        if frame is None:
-            print("Failed to decode frame")
-            continue
+            # Save the frame if recording is enabled
+            if record_flag:
+                if out is None:
+                    # Initialize video writer if it hasn't been initialized yet
+                    frame_height, frame_width, _ = frame.shape
+                    out = cv2.VideoWriter(f"recorded_video_{int(time.time())}.avi", 
+                                          cv2.VideoWriter_fourcc(*"XVID"), 
+                                          20, 
+                                          (frame_width, frame_height))
+                out.write(frame)
 
-        # Display the frame
-        cv2.imshow("Stream", frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
+            # Send a confirmation back to the client
+            socket.send(b"Frame received and processed")
+
+        except Exception as e:
+            print(f"Error occurred: {e}")
             break
 
-        # Send confirmation back to client
-        socket.send(b"Frame received")
+    # Cleanup
+    if out:
+        out.release()
+    cv2.destroyAllWindows()
+    socket.close()
 
-    except Exception as e:
-        print(f"Error: {e}")
-        break
+if __name__ == "__main__":
+    # Argument parser for recording flag
+    parser = argparse.ArgumentParser(description="Server script to receive video stream from client and optionally record it.")
+    parser.add_argument('--record', action='store_true', help="Enable recording of the received video stream.")
+    args = parser.parse_args()
 
-cv2.destroyAllWindows()
-socket.close()
+    # Call the main function with the record flag
+    main(args.record)
